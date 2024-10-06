@@ -101,19 +101,11 @@
     
     <main class="split-screen">
         <div class="left-side">
-            <img src="{{ url_for('static', filename='images/artist3.jpg') }}" alt="Taylor Swift">
-            <div class="title-description-container">
-                <h3 class="text-center mb-4" style="margin-top:10px">Taylor Swift Eras Tour</h3>
-                <div class="vertical-line"></div>
-                <div class="description">
-                    <p>
-                        Taylor Swift is an iconic American singer-songwriter known for her narrative-driven songs that often revolve around her personal life. She has evolved her musical style from country to pop, releasing critically acclaimed albums like "1989" and "Reputation." Swift has won numerous awards, including multiple Grammy Awards, and is known for her powerful songwriting, business acumen, and passionate fan base known as "Swifties."
-                    </p>
-                </div>
-            </div>
+            <img src="{{ event_image.ImageURL }}" alt="{{ event.EventName }}">
         </div>
 
         <div class="right-side">
+            {% if session.user_id %}
             <div class="form-container">
                 <h3 class="text-center mb-4">Queue Status</h3>
                 <p>Queue Number: {{ data['QNo'] }}</p>
@@ -122,6 +114,7 @@
 
                
             </div>
+            {% endif %}
         </div>
     </main>
 

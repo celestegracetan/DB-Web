@@ -489,21 +489,64 @@ def ticket_purchase(event_id):
             # flash('An error occurred during the purchase. Please try again.', 'error')
             return redirect(url_for('event', event_id=event_id))
 
-@app.route('/queue')
-def queue():
-    
-    return render_template('enterqueue.html')
+@app.route('/queue/<event_id>')
+def queue(event_id):
+    # Check if the user is logged in
+    user_id = session.get('user_id')
+    error_message = None
+    preferred_width = 1920
 
-@app.route('/joinqueue', methods=['POST'])
+    if not user_id:
+        return redirect(url_for('registersignup'))
+    
+    else:
+        # Choose preferred image based on width
+        if event.image:
+            event.preferred_image = min(event.image, key=lambda img: abs(img.Width - preferred_width))
+        else:
+            image_url = url_for('static', filename='images/default.jpg')
+
+        # Prepare event and user information for the template
+        event_image = {
+            'ImageURL': event.preferred_image.URL if event.preferred_image else url_for('static', filename='images/default.jpg')
+        }
+        data = {
+            'UserID': user_id,
+            'EventID': event_id
+        }
+        return render_template('enterqueue.html', data=data, event_image=event_image )
+
+@app.route('/joinqueue/<event_id>', methods=['POST'])
 def joinqueue():
+    error_message = None
+    preferred_width = 1920
+    # Choose preferred image based on width
+    if event.image:
+        event.preferred_image = min(event.image, key=lambda img: abs(img.Width - preferred_width))
+    else:
+        image_url = url_for('static', filename='images/default.jpg')
+
+    # Prepare event and user information for the template
+    event_image = {
+        'ImageURL': event.preferred_image.URL if event.preferred_image else url_for('static', filename='images/default.jpg')
+    }
+
     userID = request.form.get('userId')
     eventID = request.form.get('eventId')
-    QueueNo = 2
+    #QueueNo = 2
+    new_queue = Queue(
+            UserID=userID,
+            EventID=eventID,
+        )
+    db.session.add(new_queue)
+    db.session.commit()
+    queueNo = new_queue.QueueID
+
     data = {
       'UserID': userID,
       'EventID': eventID,
-      'QNo':QueueNo
+      'QNo':queueNo
     }
-    return render_template('queue.html', data=data)
+    return render_template('queue.html', data=data, event_image=event_image)
 
 
