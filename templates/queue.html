@@ -127,28 +127,8 @@
             });
         }
         window.onload = async function() {
-            var serving = 1;
-            const qno = '{{ data["QNo"] }}';
-
-            while (true) {
-                
-                if (serving != qno) {
-                    serving++;
-                    await pauseFor10Seconds() 
-
-
-                }
-                else{
-                    window.location.href = "/ticket";
-                    break;
-
-                }
-
-                // Check if the user has left the page
-                if (document.visibilityState === "hidden") {
-                    break;
-                }
-            }
+            await pauseFor10Seconds();
+            window.location.href = "{{ url_for('inqueue', event_id=event.EventID, queue_id= data['UserID']) }}";
         };
 
     </script>

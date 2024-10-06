@@ -111,8 +111,6 @@
 
                 <form id="queueform" action="{{ url_for('joinqueue', event_id=event.EventID) }}" method="post">
                     <div>
-                        <input type="hidden" name="userId" value='{{ data["UserID"] }}'>
-                        <input type="hidden" name="eventId" value='{{ data["EventID"] }}'>
                         <button type="submit" class="btn btn-primary btn-block">Join Queue</button>
                     </div>
                 </form>

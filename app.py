@@ -1,6 +1,6 @@
 from flask import Flask, render_template, request, session, url_for, redirect
 from config import Config
-from sqlalchemy import text, extract,and_, func
+from sqlalchemy import text, extract,and_, func, delete
 from sqlalchemy.orm import joinedload
 from api.ticketmaster import fetch_and_store_events
 import logging, traceback
@@ -500,6 +500,7 @@ def queue(event_id):
         return redirect(url_for('registersignup'))
     
     else:
+        event = Event.query.options(joinedload(Event.image), joinedload(Event.ticketCategory)).filter_by(EventID=event_id).first()
         # Choose preferred image based on width
         if event.image:
             event.preferred_image = min(event.image, key=lambda img: abs(img.Width - preferred_width))
@@ -510,14 +511,11 @@ def queue(event_id):
         event_image = {
             'ImageURL': event.preferred_image.URL if event.preferred_image else url_for('static', filename='images/default.jpg')
         }
-        data = {
-            'UserID': user_id,
-            'EventID': event_id
-        }
-        return render_template('enterqueue.html', data=data, event_image=event_image )
+
+        return render_template('enterqueue.html', event_image=event_image, event=event )
 
 @app.route('/joinqueue/<event_id>', methods=['POST'])
-def joinqueue():
+def joinqueue(event_id):
     error_message = None
     preferred_width = 1920
     # Choose preferred image based on width
@@ -531,12 +529,12 @@ def joinqueue():
         'ImageURL': event.preferred_image.URL if event.preferred_image else url_for('static', filename='images/default.jpg')
     }
 
-    userID = request.form.get('userId')
-    eventID = request.form.get('eventId')
-    #QueueNo = 2
+    userID = session.get('user_id')
+    event = Event.query.options(joinedload(Event.image), joinedload(Event.ticketCategory)).filter_by(EventID=event_id).first()
+
     new_queue = Queue(
             UserID=userID,
-            EventID=eventID,
+            EventID=event_id,
         )
     db.session.add(new_queue)
     db.session.commit()
@@ -544,9 +542,60 @@ def joinqueue():
 
     data = {
       'UserID': userID,
-      'EventID': eventID,
+      'EventID': event_id,
       'QNo':queueNo
     }
-    return render_template('queue.html', data=data, event_image=event_image)
+    return render_template('queue.html', data=data, event_image=event_image, event=event)
 
+@app.route('/joinqueue/<event_id>/inqueue')
+def inqueue(event_id,queue_id):
+    user_id = session.get('user_id')
+    event = Event.query.options(joinedload(Event.image), joinedload(Event.ticketCategory)).filter_by(EventID=event_id).first()
+
+    error_message = None
+    preferred_width = 1920
+    # Choose preferred image based on width
+    if event.image:
+        event.preferred_image = min(event.image, key=lambda img: abs(img.Width - preferred_width))
+    else:
+        image_url = url_for('static', filename='images/default.jpg')
+
+    # Prepare event and user information for the template
+    event_image = {
+        'ImageURL': event.preferred_image.URL if event.preferred_image else url_for('static', filename='images/default.jpg')
+    }
+
+    topQueue = db.session.query(Queue).filter(Queue.EventID == event_id).first()
+    topUser = topQueue.UserID
+
+    if topUser == user_id:
+
+        # Get user info from session
+        user = Users.query.get(user_id)
+
+        if not event:
+            # flash("Event not found!", "error")
+            return redirect(url_for('landing'))
+    
+        # Determine ticket availability
+        tickets_available = any(
+            category.SeatsAvailable > Ticket.query.filter_by(CatID=category.CatID).count()
+            for category in event.ticketCategory
+        )
+
+        return render_template('ticket.html', 
+                            event=event, 
+                            event_image=event_image,
+                            user=user,
+                            tickets_available=tickets_available)
+    
+    else:
+        db.session.remove(topQueue)
+        db.session.commit()
+        data = {
+            'UserID': user_id,
+            'EventID': event_id,
+            'QNo':queue_id
+        }
+        return render_template('queue.html', data=data, event_image=event_image, event=event)
 
