@@ -583,6 +583,11 @@ def inqueue(event_id,queue_id):
             for category in event.ticketCategory
         )
 
+        #remove from queue
+        #db.session.remove(topQueue)
+        #db.session.commit()
+
+
         return render_template('ticket.html', 
                             event=event, 
                             event_image=event_image,

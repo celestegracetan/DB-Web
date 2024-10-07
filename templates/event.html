@@ -45,7 +45,7 @@
                 <div class="row">
                     {% for event in events %}
                     <div class="col-md-4">
-                        <a href="{{ url_for('ticket', event_id=event.EventID) }}" class="event-card-link">
+                        <a href="{{ url_for('queue', event_id=event.EventID) }}" class="event-card-link">
                             <div class="event-card">
                                 {% if event.preferred_image %}
                                 <img src="{{ event.preferred_image.URL }}" alt="{{ event.EventName }}" class="event-image">
