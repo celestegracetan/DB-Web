@@ -1,8 +1,10 @@
 from flask import Flask, render_template, request, session, url_for, redirect, jsonify, make_response, flash
 from config import Config
-from sqlalchemy import text, extract,and_, func
-from sqlalchemy.orm import joinedload
-from sqlalchemy.sql import exists
+# from sqlalchemy import text, extract,and_, func
+# from sqlalchemy.orm import joinedload
+# from sqlalchemy.sql import exists
+# from sqlalchemy.exc import IntegrityError
+from flask_pymongo import PyMongo
 from api.ticketmaster import fetch_and_store_events
 import logging, traceback
 from datetime import datetime
@@ -10,100 +12,49 @@ import calendar
 import bcrypt
 from auth import hash_password, verify_password, RegistrationForm, LoginForm
 import calendar
-from models import db, Users, PaymentMethod, Location, Event, Ticket, TicketCategory, Transactions, Image, Queue
+from models import Users, PaymentMethod, Location, Event, Ticket, TicketCategory, Transactions, Image, Queue
 from werkzeug.security import generate_password_hash 
-from sqlalchemy.exc import IntegrityError
 
 app = Flask(__name__, static_folder='static')
 app.config['SECRET_KEY'] = Config.APP_SECRET_KEY
-app.config.from_object(Config)
-db.init_app(app)
+app.config["MONGO_URI"] = Config.MONGO_URI
+
+mongo = PyMongo(app)
 
 API_KEY = Config.TICKETMASTER_API_KEY
 
-# Check connection and create tables if not already created
 with app.app_context():
     events_to_fetch = 20
-    try:
-        # Test the connection to the database
-        with db.engine.connect() as connection:
-            result = connection.execute(text("SELECT 1")).scalar()
-            print(f"Connection to database successful! Result: {result}")
-        
-        # Check if tables exist
-        inspector = db.inspect(db.engine)
-        tables = inspector.get_table_names()
 
-        if not tables:
-            db.create_all()
-            logging.info("Tables created successfully!")
+    if not hasattr(mongo, 'db'):
+        print("MongoDB not properly initialized.")
+    else:
+        try:
+            # Access the collection
+            events_collection = mongo.db.events
 
-        current_event_count = db.session.query(Event).count()
-        print(f"Currently {current_event_count} events in the database.")
+            # Get the current count of events in the database
+            current_event_count = events_collection.count_documents({})
 
-        if current_event_count < events_to_fetch:
-            print(f"Less than {events_to_fetch} events found in the database, fetching more events...")
-            fetch_and_store_events(API_KEY, events_to_fetch - current_event_count)
-        else:
-            print("Sufficient events are already stored in the database, no action needed.")
-    except Exception as e:
-        logging.error(f"Error during database setup or event fetching: {e}\n{traceback.format_exc()}")
+            print(f"Currently {current_event_count} events in the database.")
 
-# Check connection and create indexes if not already created
-with app.app_context():
-    try:
-        # Test the connection to the database
-        with db.engine.connect() as connection:
-            result = connection.execute(text("SELECT 1")).scalar()
-            print(f"Connection to database successful! Result: {result}")
+            if current_event_count < events_to_fetch:
+                needed_events = events_to_fetch - current_event_count
+                print(f"Less than {events_to_fetch} events found in the database, fetching more events...")
+                fetch_and_store_events(API_KEY, needed_events, mongo)
+            else:
+                print("Sufficient events are already stored in the database, no action needed.")
 
-        # Create indexes if they don't exist
-        indexes_to_create = [
-            """
-            DO $$ 
-            BEGIN
-                IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_ticket_event') THEN
-                    CREATE INDEX idx_ticket_event ON "Ticket"("EventID");
-                END IF;
-            END $$;
-            """,
-            """
-            DO $$ 
-            BEGIN
-                IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_ticket_cat') THEN
-                    CREATE INDEX idx_ticket_cat ON "TicketCategory"("CatID");
-                END IF;
-            END $$;
-            """,
-            """
-            DO $$ 
-            BEGIN
-                IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_ticket_event_date') THEN
-                    CREATE INDEX idx_ticket_event_date ON "Ticket"("EventID");
-                END IF;
-            END $$;
-            """
-        ]
-
-        # Execute the index creation queries
-        for query in indexes_to_create:
-            with db.engine.connect() as connection:
-                connection.execute(text(query))
-        print("Indexes checked and created if necessary.")
-
-    except Exception as e:
-        logging.error(f"Error during index creation: {e}\n{traceback.format_exc()}")
-
- 
-
-
+        except Exception as e:
+            # Adjust the error handling to log appropriate MongoDB errors if necessary
+            print(f"An error occurred: {str(e)}\n{traceback.format_exc()}")
+    
 # Routes
 @app.route('/')
 def home():
     preferred_width = 1920
 
-    # Query to fetch events with the most transactions
-    hot_events_info = list(db.events.aggregate([
+    hot_events_info = list(mongo.db.events.aggregate([
         {
             '$lookup': {
                 'from': 'transactions',
@@ -1060,4 +1011,4 @@ def delete_payment(user_id):
 
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000)  
+    app.run(host='0.0.0.0', port=5000)
