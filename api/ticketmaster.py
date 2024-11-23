@@ -24,7 +24,7 @@ def fetch_and_store_events(api_key, total_events, mongo):
     seen_event_names = set()
 
     events_collection = mongo.db.events
-    existing_event_names = {event['EventName'] for event in events_collection.find({}, {'EventName': 1})}
+    existing_event_names = {event['name'] for event in events_collection.find({}, {'name': 1})}
     seen_event_names.update(existing_event_names)
 
     while events_fetched < total_events:
@@ -88,19 +88,24 @@ def store_event(event_data, mongo):
         mongo.db.events.insert_one(event_document)
         logging.info(f"Event {event_document['name']} stored successfully in MongoDB.")
 
-        locationID = Location.query.filter_by(LocationID=event.LocationID).first()
-        if not locationID:
-            fetch_venue_by_id(API_KEY, event.LocationID, mongo)
-        db.session.add(event)
-        db.session.flush()  # Flush to get the event ID for image relationship
-        logging.info(f"Event name: {event.EventName}, type: {event.EventType}, start date: {event.EventDate}, venue name: {event.LocationID}, id: {event.EventID} stored successfully!")
-        
-        min_price = event_data['priceRanges'][0]['min']
-        max_price = event_data['priceRanges'][0]['max']
+        location_id = event_data["_embedded"]["venues"][0]["id"]
+        location = mongo.db.locations.find_one({"id": location_id})
 
-        store_ticket_category(min_price, max_price, event.EventID)
+        if not location:
+            fetch_venue_by_id(API_KEY, location_id, mongo)
+        
+        logging.info(
+            f"Event name: {event_document['name']}, type: {event_document['type']}, "
+            f"start date: {event_document['startDateTime']}, "
+            f"venues: {[venue['name'] for venue in event_document['venues']]}, "
+            f"id: {event_document['id']} stored successfully in MongoDB!"
+)
+        min_price = event_data.get('priceRanges', [{}])[0].get('min', 0)
+        max_price = event_data.get('priceRanges', [{}])[0].get('max', 0)
+
+        store_ticket_category(min_price, max_price, event_data['id'], mongo)
         if 'images' in event_data:
-            store_image(event_data['images'], None, event.EventID, mongo)
+            store_image(event_data['images'], None, event_data['id'], mongo)
 
     except KeyError as e:
         logging.error(f"Missing expected key in event data: {e}")
@@ -172,7 +177,6 @@ def store_ticket_category(min_price, max_price, event_id, mongo):
 
     except Exception as e:
         logging.error(f"Failed to store ticket categories: {e}\n{traceback.format_exc()}")
-
 
 def store_image(image_data, location_id, event_id, mongo):
     images_to_store = []

@@ -45,15 +45,17 @@
                 <div class="row">
                     {% for event in events %}
                     <div class="col-md-4">
-                        <a href="{{ url_for('queue', event_id=event.EventID) }}" class="event-card-link">
+                        <a href="{{ url_for('ticket', event_id=event.EventID) }}" class="event-card-link">
                             <div class="event-card">
                                 {% if event.preferred_image %}
-                                <img src="{{ event.preferred_image.URL }}" alt="{{ event.EventName }}" class="event-image">
+                                <img src="{{ event.preferred_image }}" alt="{{ event.EventName }}" class="event-image">
                                 {% else %}
                                 <img src="{{ url_for('static', filename='images/default.jpg') }}" alt="Default Image" class="event-image">
                                 {% endif %}
                                 <div class="card-content">
-                                    <div class="event-date">{{ event.EventDate.strftime('%d %b %Y') }}</div>
+                                    <div class="event-date">
+                                        {{ event['startDateTime'].strftime('%d %b %Y') if event['startDateTime'] else 'No Date Available' }}
+                                    </div>
                                     <div class="event-title">{{ event.EventName }}</div>
                                 </div>
                                 <div class="overlay"><span>→</span></div>
