@@ -29,18 +29,18 @@ class Users:
 
 # PaymentMethod Collection
 class PaymentMethod:
-    COLLECTION_NAME = "payment_methods"
+    COLLECTION_NAME = "paymentMethods"
 
     @staticmethod
     def add_payment_method(mongo, user_id, card_number, cvv, card_type, expire_date, bill_addr, card_holder_name):
         payment_method = {
             "user_id": ObjectId(user_id),
-            "card_number": card_number,
-            "cvv": cvv,
-            "card_type": card_type,
-            "expire_date": expire_date,
-            "bill_addr": bill_addr,
-            "card_holder_name": card_holder_name
+            "CardNumber": card_number,
+            "CVV": cvv,
+            "CardType": card_type,
+            "ExpireDate": expire_date,
+            "BillAddr": bill_addr,
+            "CardHolderName": card_holder_name
         }
         return mongo.db[PaymentMethod.COLLECTION_NAME].insert_one(payment_method).inserted_id
 
@@ -102,11 +102,11 @@ class Ticket:
     @staticmethod
     def add_ticket(mongo, category_id, event_id, seat_no, status, transaction_id):
         ticket = {
-            "category_id": category_id,
-            "event_id": event_id,
-            "seat_no": seat_no,
-            "status": status,
-            "transaction_id": transaction_id
+            "CatID": category_id,
+            "EventID": event_id,
+            "SeatNo": seat_no,
+            "Status": status,
+            "TranscID": transaction_id
         }
         return mongo.db[Ticket.COLLECTION_NAME].insert_one(ticket).inserted_id
 
@@ -141,13 +141,15 @@ class Transactions:
     COLLECTION_NAME = "transactions"
 
     @staticmethod
-    def add_transaction(mongo, user_id, amount, status, card_id):
+    def add_transaction(mongo, user_id, amount, status, card_id, event_id):
         transaction = {
-            "user_id": ObjectId(user_id),
-            "amount": amount,
-            "status": status,
-            "card_id": ObjectId(card_id),
-            "date": datetime.utcnow()
+            "TranAmount": float(amount),     
+            "TransDate": datetime.utcnow(),       
+            "TranStatus": status,
+            "UserID": ObjectId(user_id), 
+            "UserID": ObjectId(user_id), 
+            "EventID": ObjectId(event_id),
+            "CardID": ObjectId(card_id)
         }
         return mongo.db[Transactions.COLLECTION_NAME].insert_one(transaction).inserted_id
 

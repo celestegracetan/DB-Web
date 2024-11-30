@@ -87,15 +87,13 @@ def home():
     # Prepare data to render
     hot_events = []
     for event in hot_events_info:
-        image_url = event.get('image_url', url_for('static', filename='images/default.jpg'))
-
         # Fetch the image for each event
         image = mongo.db.images.find_one({'EventID': event.get('id')}) or {}
         image_url = image['URL'] if image else 'static/images/event1.jpg'
 
         hot_events.append({
-            'EventID': str(event['_id']),
-            'EventName': event['name'],
+            'id': str(event['id']),
+            'name': event['name'],
             'ImageURL': image_url
         })
 
@@ -336,7 +334,8 @@ def login():
             # Save the user ID in the session
             session['user_id'] = str(user['_id'])  # Use the MongoDB ObjectId as the session ID
             error_message = 'Login successful!'
-            return render_template('landing.html', error_message=error_message)
+            # return render_template('landing.html', error_message=error_message)
+            return redirect(url_for('home'))
         else:
             error_message = 'Invalid email or password'
             return render_template('registersignup.html', login_form=login_form, registration_form=registration_form, error_message=error_message)
@@ -353,7 +352,8 @@ def login():
 def logout():
     session.pop('user_id', None)  # Remove user_id from session
     error_message = 'You have been logged out.'
-    return render_template('landing.html', error_message=error_message)
+    # return render_template('landing.html', error_message=error_message)
+    return redirect(url_for('home'))
 
 @app.route('/myticket')
 def myticket():
@@ -370,14 +370,14 @@ def myticket():
         transaction_details = []
 
         for transaction in transactions:
-            tickets = list(mongo.db.tickets.find({"TranscID": transaction["TranscID"]}))
+            tickets = list(mongo.db.tickets.find({"TranscID": str(transaction["_id"])}))
             for ticket in tickets:
                 event = mongo.db.events.find_one({"id": ticket["EventID"]})
-                category = mongo.db.ticketCategories.find_one({"CatID": ticket["CatID"]})
+                category = mongo.db.ticketCategories.find_one({"_id": ticket["CatID"]})
 
                 # Ticket details for upcoming and finished events, comparing event date
                 ticket_info = {
-                    'TranscID': transaction["TranscID"],
+                    'TranscID': transaction["_id"],
                     'TransDate': transaction["TransDate"].strftime('%d-%m-%Y %I:%M%p'),
                     'EventName': event["name"] if event else "Unknown Event",
                     'SeatNo': ticket["SeatNo"],
@@ -388,7 +388,7 @@ def myticket():
 
                 # Transaction details without seat category (just amount and status)
                 transaction_info = {
-                    'TranscID': transaction["TranscID"],
+                    'TranscID': str(transaction["_id"]),
                     'TransDate': transaction["TransDate"].strftime('%d-%m-%Y %I:%M%p'),
                     'EventName': event["name"] if event else "Unknown Event",
                     'SeatNo': ticket["SeatNo"],
@@ -406,15 +406,23 @@ def myticket():
 @app.route('/ticket/<event_id>')
 def ticket(event_id):
     error_message = None
-    preferred_width = 1920
 
     # Get user info from session
-    user_id = session.get('user_id')
-    if not user_id:
-        return redirect(url_for('registersignup'))
-
-    # Fetch user information
-    user = mongo.db.users.find_one({"UserID": user_id})
+    user_id = session.get('user_id')    
+    # Fetch the user from the MongoDB `users` collection
+    object_id = ObjectId(user_id)
+    user = mongo.db.users.find_one({"_id": object_id})
+    if user:
+        # Convert ObjectId to string here
+        user['_id'] = str(user['_id'])
+    if not user:
+        error_message = 'Please log in first'
+        return render_template(
+            'registersignup.html',
+            error_message=error_message,
+            registration_form=RegistrationForm(),
+            login_form=LoginForm()
+        )
 
     # Fetch event details
     event = mongo.db.events.find_one({"id": event_id})
@@ -425,25 +433,26 @@ def ticket(event_id):
     ticket_categories = list(mongo.db.ticketCategories.find({"EventID": event_id}))
 
     # Determine ticket availability
-    tickets_available = any(
-        category["SeatsAvailable"] > mongo.db.tickets.count_documents({"CatID": category["CatID"]})
-        for category in ticket_categories
-    )
+    tickets_available = True  # Assume tickets are available if no documents are found
+    if mongo.db.tickets.count_documents({}) > 0:  # Checks if the tickets collection has any documents
+        tickets_available = any(
+            category["SeatsAvailable"] > mongo.db.tickets.count_documents({"CatID": str(category["_id"])})
+            for category in ticket_categories
+        )
 
-    # Choose preferred image based on width
-    if "images" in event and event["images"]:
-        preferred_image = min(event["images"], key=lambda img: abs(img["Width"] - preferred_width))
-        event_image = {"ImageURL": preferred_image["URL"]}
-    else:
-        event_image = {"ImageURL": url_for('static', filename='images/default.jpg')}
+    image = mongo.db.images.find_one({'EventID': event.get('id')}) or {}
+    event_image = image['URL'] if image else 'static/images/event1.jpg'
 
     # Fetch payment method for the user
-    payment_method = mongo.db.paymentMethods.find_one({"UserID": user_id})
+    payment_method = mongo.db.paymentMethods.find_one({"user_id": user_id})
+    if payment_method and 'ExpireDate' in payment_method:
+        payment_method['ExpireDate'] = datetime.strptime(payment_method['ExpireDate'], '%Y-%m-%d')
 
     # Render the ticket page
     return render_template(
         'ticket.html',
         event=event,
+        ticket_categories=ticket_categories,
         calendar=calendar,
         event_image=event_image,
         user=user,
@@ -472,8 +481,9 @@ def ticket_purchase(event_id):
         category_id = request.form.get('category')
         quantity = int(request.form.get('quantity'))
 
-        # Fetch the selected ticket category
-        ticket_category = mongo.db.ticketCategories.find_one({"CatID": category_id})
+        # Fetch the selected ticket categoryticket_categorie
+        object_id = ObjectId(category_id)
+        ticket_category = mongo.db.ticketCategories.find_one({"_id": object_id})
         if not ticket_category:
             # flash('Ticket category not found.', 'error')
             return redirect(url_for('ticket', event_id=event_id))
@@ -492,11 +502,12 @@ def ticket_purchase(event_id):
         billing_address = request.form.get('billing-address')
 
         # Check if the user has an existing payment method
-        payment_method = mongo.db.paymentMethods.find_one({"UserID": user_id})
+        payment_method = mongo.db.paymentMethods.find_one({"user_id": user_id})
         if payment_method:
             # Update existing payment method
+            object_id = ObjectId(user_id)
             mongo.db.paymentMethods.update_one(
-                {"UserID": user_id},
+                {"user_id": user_id},
                 {
                     "$set": {
                         "CVV": cvv,
@@ -509,7 +520,7 @@ def ticket_purchase(event_id):
         else:
             # Create a new payment method
             payment_method = {
-                "UserID": user_id,
+                "user_id": user_id,
                 "CardNumber": card_number,
                 "CVV": cvv,
                 "CardType": "Unknown",
@@ -523,22 +534,24 @@ def ticket_purchase(event_id):
         total_price = ticket_category["CatPrice"] * quantity
         transaction = {
             "TranAmount": total_price,
+            "TransDate": datetime.utcnow(),
             "TranStatus": "Completed",
             "UserID": user_id,
             "EventID": event_id,
+            "CardID": payment_method.get('_id')
         }
         transaction_id = mongo.db.transactions.insert_one(transaction).inserted_id
 
         # Allocate tickets
         tickets = []
-        highest_seat = (
-            mongo.db.tickets.find({"CatID": category_id})
-            .sort("SeatNo", -1)
-            .limit(1)
-            .next()
-            .get("SeatNo", 0)
-        )
-        highest_seat = highest_seat or 0
+        highest_seat_cursor = mongo.db.tickets.find({"CatID": category_id}).sort("SeatNo", -1).limit(1)
+        highest_seat = 0
+        try:
+            highest_seat_document = highest_seat_cursor.next()
+            highest_seat = highest_seat_document["SeatNo"]
+        except StopIteration:
+            highest_seat = 0  # No tickets found, assume starting at seat 0
+
         if highest_seat + quantity > ticket_category["SeatsAvailable"]:
             # flash('Not enough tickets available', 'error')
             return redirect(url_for('ticket', event_id=event_id))
@@ -608,8 +621,12 @@ def joinqueue(event_id):
     if not user_id:
         return redirect(url_for('registersignup'))
 
-    # Fetch user from MongoDB
-    user = mongo.db.users.find_one({"id": user_id})
+    # Fetch the user from the MongoDB `users` collection
+    object_id = ObjectId(user_id)
+    user = mongo.db.users.find_one({"_id": object_id})
+    if user:
+        # Convert ObjectId to string here
+        user['_id'] = str(user['_id'])
     if not user:
         error_message = 'Please log in first'
         return render_template(
@@ -701,7 +718,12 @@ def inqueue(event_id, queue_id):
 
         # Check if the logged-in user is at the top of the queue
         if top_user_id == user_id:
-            user = mongo.db.users.find_one({"id": user_id})
+            # Fetch the user from the MongoDB `users` collection
+            object_id = ObjectId(user_id)
+            user = mongo.db.users.find_one({"_id": object_id})
+            if user:
+                # Convert ObjectId to string here
+                user['_id'] = str(user['_id'])
 
             # Determine ticket availability
             tickets_available = any(
@@ -740,7 +762,11 @@ def inject_user():
     user = None
     if user_id:
         # Fetch the user from the MongoDB `users` collection
-        user = mongo.db.users.find_one({"_id": user_id})
+        object_id = ObjectId(user_id)
+        user = mongo.db.users.find_one({"_id": object_id})
+        if user:
+            # Convert ObjectId to string here
+            user['_id'] = str(user['_id'])
     return dict(user=user)
 
 @app.route('/aboutus', methods=['GET', 'POST'])
@@ -1035,11 +1061,11 @@ def get_event_data():
 
     return jsonify({'ticket_sales_data': ticket_sales_data, 'revenue_data': revenue_data})
 
-@app.route('/profile/<int:user_id>', methods=['GET', 'POST'])
+@app.route('/profile/<string:user_id>', methods=['GET', 'POST'])
 def profile(user_id):
     # Check if the user is logged in
     if 'user_id' not in session:
-        return redirect(url_for('login'))  # Redirect to login if not authenticated
+        return redirect(url_for('registersignup'))  # Redirect to login if not authenticated
 
     # Get the current user's ID from the session
     current_user_id = session['user_id']
@@ -1049,12 +1075,19 @@ def profile(user_id):
         return "Access Denied", 403  # Return an error message or redirect to an error page
 
     # Fetch the user from MongoDB
-    user = mongo.db.users.find_one({'id': user_id})
-    if not user:
+    object_id = ObjectId(user_id)
+    user = mongo.db.users.find_one({"_id": object_id})
+    if user:
+        # Convert ObjectId to string here
+        user['_id'] = str(user['_id'])
+    else:
         return "User not found", 404  # Return a 404 error if the user does not exist
 
     # Fetch the payment method for the user
-    payment_method = mongo.db.paymentMethods.find_one({'UserID': user_id})
+    payment_method = mongo.db.paymentMethods.find_one({'user_id': user_id})
+    if payment_method and 'ExpireDate' in payment_method:
+            payment_method['ExpireDate'] = datetime.strptime(payment_method['ExpireDate'], '%Y-%m-%d')
+
     current_year = datetime.now().year
 
     # If no payment method exists, provide placeholders for template
@@ -1070,7 +1103,7 @@ def profile(user_id):
     # Render the profile page with user and payment method information
     return render_template('profile.html', user=user, paymentMethod=payment_method, current_year=current_year)
 
-@app.route('/profile/<int:user_id>/update', methods=['POST'])
+@app.route('/profile/<string:user_id>/update', methods=['POST'])
 def update_profile(user_id):
     # Check if the user is logged in
     if 'user_id' not in session:
@@ -1083,8 +1116,12 @@ def update_profile(user_id):
     if current_user_id != user_id:
         return "Access Denied", 403
 
-    # Fetch the user from MongoDB
-    user = mongo.db.users.find_one({'id': user_id})
+    # Fetch the user from the MongoDB `users` collection
+    object_id = ObjectId(user_id)
+    user = mongo.db.users.find_one({"_id": object_id})
+    if user:
+        # Convert ObjectId to string here
+        user['_id'] = str(user['_id'])
     if not user:
         return "User not found", 404
 
@@ -1109,7 +1146,7 @@ def update_profile(user_id):
     # Update the user's information in MongoDB
     try:
         mongo.db.users.update_one(
-            {'id': user_id},
+            {'_id': object_id},
             {'$set': updated_fields}
         )
         flash('Profile updated successfully!', 'success')
@@ -1118,7 +1155,7 @@ def update_profile(user_id):
 
     return redirect(url_for('profile', user_id=user_id))
 
-@app.route('/profile/<int:user_id>/deactivate', methods=['POST'])
+@app.route('/profile/<string:user_id>/deactivate', methods=['POST'])
 def deactivate_account(user_id):
     # Check if the user is logged in
     if 'user_id' not in session:
@@ -1133,7 +1170,8 @@ def deactivate_account(user_id):
 
     try:
         # Delete the user document from the MongoDB users collection
-        result = mongo.db.users.delete_one({'id': user_id})
+        object_id = ObjectId(user_id)
+        result = mongo.db.users.delete_one({'_id': object_id})
 
         if result.deleted_count > 0:
             flash('Account deactivated successfully!', 'success')
@@ -1144,12 +1182,12 @@ def deactivate_account(user_id):
     except Exception as e:
         flash(f'Error deactivating account: {str(e)}', 'danger')
 
-    return redirect(url_for('landing'))
+    return redirect(url_for('login'))
 
-@app.route('/update_payment/<int:user_id>', methods=['POST'])
+@app.route('/update_payment/<string:user_id>', methods=['POST'])
 def update_payment(user_id):
     # Fetch the payment method for the given user from MongoDB
-    payment_method = mongo.db.payment_methods.find_one({'user_id': user_id})
+    payment_method = mongo.db.paymentMethods.find_one({'user_id': user_id})
 
     if not payment_method:
         flash('Payment method not found!', 'danger')
@@ -1157,9 +1195,9 @@ def update_payment(user_id):
 
     # Update the payment method fields from the form data
     updated_data = {
-        'card_holder_name': request.form['cardHolderName'],
-        'card_number': request.form['cardNumber'],
-        'billing_address': request.form['billingAddress'],
+        'CardHolderName': request.form['cardHolderName'],
+        'CardNumber': request.form['cardNumber'],
+        'BillAddr': request.form['billingAddress'],
     }
 
     # Combine the month and year into an expiration date
@@ -1173,8 +1211,7 @@ def update_payment(user_id):
         updated_data['cvv'] = request.form['cvv']
 
     try:
-        # Update the document in the database
-        mongo.db.payment_methods.update_one(
+        mongo.db.paymentMethods.update_one(
             {'user_id': user_id},
             {'$set': updated_data}
         )
@@ -1185,10 +1222,15 @@ def update_payment(user_id):
     return redirect(url_for('profile', user_id=user_id))
 
 
-@app.route('/add_payment/<int:user_id>', methods=['POST'])
+@app.route('/add_payment/<string:user_id>', methods=['POST'])
 def add_payment(user_id):
-    # Fetch the user from MongoDB to verify existence
-    user = mongo.db.users.find_one({'user_id': user_id})
+    # Fetch the user from the MongoDB `users` collection
+    object_id = ObjectId(user_id)
+    user = mongo.db.users.find_one({"_id": object_id})
+    if user:
+        # Convert ObjectId to string here
+        user['_id'] = str(user['_id'])
+
     if not user:
         flash('User not found!', 'danger')
         return redirect(url_for('registersignup'))
@@ -1209,36 +1251,36 @@ def add_payment(user_id):
     # Create the new payment method document
     new_payment_method = {
         'user_id': user_id,
-        'card_holder_name': card_holder_name,
-        'card_number': card_number,
-        'expire_date': expire_date,
-        'billing_address': billing_address,
-        'cvv': cvv,
-        'card_type': "Visa"  # This can be determined dynamically if needed
+        'CardHolderName': card_holder_name,
+        'CardNumber': card_number,
+        'ExpireDate': expire_date,
+        'BillAddr': billing_address,
+        'CVV': cvv,
+        'CardType': "Visa"  # This can be determined dynamically if needed
     }
 
     try:
         # Insert the new payment method into the MongoDB collection
-        mongo.db.payment_methods.insert_one(new_payment_method)
+        mongo.db.paymentMethods.insert_one(new_payment_method)
         flash('Payment method added successfully!', 'success')
     except Exception as e:
         flash(f'Error adding payment method: {str(e)}', 'danger')
 
     return redirect(url_for('profile', user_id=user_id))
 
-@app.route('/delete_payment/<int:user_id>', methods=['POST'])
+@app.route('/delete_payment/<string:user_id>', methods=['POST'])
 def delete_payment(user_id):
     # Find the payment method for the given user in MongoDB
-    payment_method = mongo.db.payment_methods.find_one({'user_id': user_id})
+    payment_method = mongo.db.paymentMethods.find_one({'user_id': user_id})
 
     if payment_method:
         try:
-            # Remove the payment method from the `payment_methods` collection
-            mongo.db.payment_methods.delete_one({'user_id': user_id})
+            # Remove the payment method from the `paymentMethods` collection
+            mongo.db.paymentMethods.delete_one({'user_id': user_id})
 
             # Set `card_id` to `None` for all transactions associated with this payment method
             mongo.db.transactions.update_many(
-                {'card_id': payment_method.get('_id')},
+                {'card_id': payment_method.get('user_id')},
                 {'$set': {'card_id': None}}
             )
 

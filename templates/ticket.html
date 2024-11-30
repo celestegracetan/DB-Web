@@ -81,13 +81,13 @@
 
     <main class="split-screen">
         <div class="left-side">
-            <img src="{{ event_image.ImageURL }}" alt="{{ event.EventName }}">
+            <img src="{{ event_image }}" alt="{{ event.name }}">
         </div>
 
         <div class="right-side" style="margin-top:40px">
             {% if session.user_id %}
             <div class="form-container">
-                <h4 class="text-center mb-4">{{ event.EventName }}</h4>
+                <h4 class="text-center mb-4">{{ event.name }}</h4>
 
                 <div class="details-box">
                     <h5>Contact Details</h5>
@@ -106,13 +106,13 @@
                 </div>
 
                 {% if tickets_available %}
-                <form id="paymentForm" method="POST" action="{{ url_for('ticket_purchase', event_id=event.EventID) }}">
+                <form id="paymentForm" method="POST" action="{{ url_for('ticket_purchase', event_id=event.id) }}">
                     <div class="form-group">
                         <label for="category">Category</label>
-                        {% if event.ticketCategory %}
+                        {% if ticket_categories %}
                         <select class="form-control" id="category" name="category" onchange="calculateTotal()">
-                            {% for category in event.ticketCategory %}
-                            <option value="{{ category.CatID }}" data-price="{{ '%.2f'|format(category.CatPrice) }}">
+                            {% for category in ticket_categories %}
+                            <option value="{{ category._id }}" data-price="{{ '%.2f'|format(category.CatPrice) }}">
                                 {{ category.CatName }} - ${{ '%.2f'|format(category.CatPrice) }}
                             </option>
                             {% endfor %}
