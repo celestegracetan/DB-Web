@@ -1,9 +1,5 @@
 from flask import Flask, render_template, request, session, url_for, redirect, jsonify, make_response, flash
 from config import Config
-# from sqlalchemy import text, extract,and_, func
-# from sqlalchemy.orm import joinedload
-# from sqlalchemy.sql import exists
-# from sqlalchemy.exc import IntegrityError
 from flask_pymongo import PyMongo
 from pymongo import ASCENDING
 from api.ticketmaster import fetch_and_store_events
