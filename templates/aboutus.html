@@ -183,26 +183,24 @@
 
     <!-- Default Event Statistics -->
     <div class="container statistics-section" style="margin-top: 50px;">
-<!-- Search Bar Section -->
-<div class="container filter-section">
-    <h3 class="text-center" style="margin-bottom:50px">Search for an Event</h3>
-    <div class="row justify-content-center">
-        <div class="col-md-6">
-            <div class="input-group mb-3">
-                <select class="form-control" id="searchEvent" aria-label="Search Event">
-                    {% for event in event_list %}
-                    <option value="{{ event.EventName }}" {% if event.EventName == "Phoenix Suns vs. Portland Trail Blazers" %}selected{% endif %}>{{ event.EventName }}</option>
-                    {% endfor %}
-                </select>
-                <div class="input-group-append">
-                    <button class="btn btn-primary" type="button" id="applyButton">Apply</button>
+        <!-- Search Bar Section -->
+        <div class="container filter-section">
+            <h3 class="text-center" style="margin-bottom:50px">Search for an Event</h3>
+            <div class="row justify-content-center">
+                <div class="col-md-6">
+                    <div class="input-group mb-3">
+                        <select class="form-control" id="searchEvent" aria-label="Search Event">
+                            {% for event in event_list %}
+                            <option value="{{ event }}" {% if event == "The The Australian Tour" %}selected{% endif %}>{{ event }}</option>
+                            {% endfor %}
+                        </select>
+                        <div class="input-group-append">
+                            <button class="btn btn-primary" type="button" id="applyButton">Apply</button>
+                        </div>
+                    </div>
                 </div>
             </div>
-        </div>
-    </div>
-</div>
-
-
+        </div>  
 
         <div class="row d-flex justify-content-center">
             <div class="col-md-6">

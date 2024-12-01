@@ -21,6 +21,7 @@ import math
 
 app = Flask(__name__, static_folder='static')
 app.config['SECRET_KEY'] = Config.APP_SECRET_KEY
+# app.config['WTF_CSRF_ENABLED'] = False
 app.config["MONGO_URI"] = Config.MONGO_URI
 
 mongo = PyMongo(app)
@@ -470,7 +471,7 @@ def ticket_purchase(event_id):
     # Check if the event exists
     event = mongo.db.events.find_one({"id": event_id})
     if not event:
-        return redirect(url_for('landing'))
+        return redirect(url_for('login'))
 
     # Get ticket categories for the event
     ticket_categories = list(mongo.db.ticketCategories.find({"EventID": event_id}))
@@ -760,13 +761,15 @@ def inqueue(event_id, queue_id):
 def inject_user():
     user_id = session.get('user_id')
     user = None
-    if user_id:
-        # Fetch the user from the MongoDB `users` collection
-        object_id = ObjectId(user_id)
-        user = mongo.db.users.find_one({"_id": object_id})
-        if user:
-            # Convert ObjectId to string here
-            user['_id'] = str(user['_id'])
+    if user_id and isinstance(user_id, str) and len(user_id) == 24:
+        try:
+            object_id = ObjectId(user_id)  # Ensure user_id is a valid ObjectId string
+            user = mongo.db.users.find_one({"_id": object_id})
+            if user:
+                user['_id'] = str(user['_id'])
+        except bson.errors.InvalidId:
+            # Log invalid user_id attempts or handle them as needed
+            app.logger.error("Invalid user_id in session")
     return dict(user=user)
 
 @app.route('/aboutus', methods=['GET', 'POST'])
@@ -801,51 +804,6 @@ def aboutus():
     total_events = mongo.db.events.count_documents({})
     total_locations = mongo.db.locations.count_documents({})
 
-    # Query for ticket sales data (Line Chart)
-    ticket_sales_results = mongo.db.tickets.aggregate([
-        {
-            "$lookup": {
-                "from": "events",
-                "localField": "EventID",
-                "foreignField": "id",
-                "as": "event"
-            }
-        },
-        {"$unwind": "$event"},
-        {
-            "$group": {
-                "_id": "$event.startDateTime",
-                "TicketsSold": {"$sum": 1}
-            }
-        },
-        {"$sort": {"_id": 1}}
-    ])
-    ticket_sales_results = list(ticket_sales_results)
-    ticket_sales_dates = [result["_id"].strftime('%Y-%m-%d') for result in ticket_sales_results]
-    ticket_sales_data = [result["TicketsSold"] for result in ticket_sales_results]
-
-    # Query for revenue data (Bar Chart)
-    revenue_results = mongo.db.tickets.aggregate([
-        {
-            "$lookup": {
-                "from": "events",
-                "localField": "EventID",
-                "foreignField": "id",
-                "as": "event"
-            }
-        },
-        {"$unwind": "$event"},
-        {
-            "$group": {
-                "_id": "$event.name",
-                "TotalRevenue": {"$sum": "$price"}
-            }
-        }
-    ])
-    revenue_results = list(revenue_results)
-    revenue_event_names = [result["_id"] for result in revenue_results]
-    revenue_data = [result["TotalRevenue"] for result in revenue_results]
-
     # Query for ticket categories (Pie Chart)
     category_results = mongo.db.ticketCategories.aggregate([
         {
@@ -861,25 +819,135 @@ def aboutus():
 
     # Query for events by location (Doughnut Chart)
     location_results = mongo.db.events.aggregate([
-        {
-            "$lookup": {
-                "from": "locations",
-                "localField": "LocationID",
-                "foreignField": "id",
-                "as": "location"
-            }
-        },
-        {"$unwind": "$location"},
+        {"$unwind": "$venues"},  # Unwind the venues array first to access the objects within
         {
             "$group": {
-                "_id": "$location.name",
-                "EventsCount": {"$sum": 1}
+                "_id": "$venues.name",  # Group by venue name directly from the unwound venues
+                "EventsCount": {"$sum": 1}  # Count the number of events per venue
             }
-        }
+        },
+        {"$sort": {"EventsCount": -1}}  # Optional: sort by the count of events descending
     ])
     location_results = list(location_results)
     location_names = [result["_id"] for result in location_results]
     location_data = [result["EventsCount"] for result in location_results]
+
+    # Query for ticket sales data (Line Chart)
+    ticket_sales_results = mongo.db.transactions.aggregate([
+        {
+            "$addFields": {
+                "trans_id_str": {"$toString": "$_id"}  # Convert ObjectId to string
+            }
+        },
+        {
+            "$lookup": {
+                "from": "tickets",
+                "localField": "trans_id_str",  # Use the string version for lookup
+                "foreignField": "TranscID",
+                "as": "ticket_info"
+            }
+        },
+        {"$unwind": "$ticket_info"},  # Unwind the results from lookup
+        {
+            "$group": {
+                "_id": {
+                    "year": {"$year": "$TransDate"},
+                    "month": {"$month": "$TransDate"},
+                    "day": {"$dayOfMonth": "$TransDate"}
+                },
+                "TicketsSold": {"$sum": 1}
+            }
+        },
+        {"$sort": {"_id": 1}}
+    ])
+    ticket_sales_results = list(ticket_sales_results)
+    ticket_sales_dates = [
+        f"{result['_id']['year']}-{result['_id']['month']:02d}-{result['_id']['day']:02d}"
+        for result in ticket_sales_results if result['_id']  # Ensure there's a result to format
+    ]
+    ticket_sales_data = [result["TicketsSold"] for result in ticket_sales_results]
+
+    # Query for revenue data (Bar Chart)
+    revenue_results = mongo.db.tickets.aggregate([
+        {
+            "$lookup": {
+                "from": "events",
+                "localField": "EventID",
+                "foreignField": "id",
+                "as": "event"
+            }
+        },
+        {"$unwind": "$event"},
+        {
+            "$lookup": {
+                "from": "ticketCategories",
+                "let": {"category_id": {"$toObjectId": "$CatID"}},  # Convert CatID from string to ObjectId
+                "pipeline": [
+                    {"$match": {"$expr": {"$eq": ["$_id", "$$category_id"]}}}
+                ],
+                "as": "category"
+            }
+        },
+        {"$unwind": "$category"},
+        {
+            "$group": {
+                "_id": "$event.name",
+                "TotalRevenue": {"$sum": "$category.CatPrice"}
+            }
+        },
+        {"$sort": {"TotalRevenue": -1}}  # Optional: sort by the total revenue descending
+    ])
+    revenue_results = list(revenue_results)
+    revenue_event_names = [result["_id"] for result in revenue_results]
+    revenue_data = [result["TotalRevenue"] for result in revenue_results]
+
+    # Query for revenue per event type
+    revenue_per_event_type_results = mongo.db.events.aggregate([
+        {
+            "$lookup": {
+                "from": "tickets",
+                "localField": "id",
+                "foreignField": "EventID",
+                "as": "tickets"
+            }
+        },
+        {"$unwind": "$tickets"},
+        {
+            "$lookup": {
+                "from": "ticketCategories",
+                "let": {"cat_id": {"$toObjectId": "$tickets.CatID"}},
+                "pipeline": [
+                    {"$match": {"$expr": {"$eq": ["$_id", "$$cat_id"]}}}
+                ],
+                "as": "ticketCategory"
+            }
+        },
+        {"$unwind": "$ticketCategory"},
+        {
+            "$group": {
+                "_id": "$type",
+                "TotalRevenue": {"$sum": "$ticketCategory.CatPrice"}
+            }
+        },
+        {"$sort": {"TotalRevenue": -1}}
+    ])
+    revenue_per_event_type_results = list(revenue_per_event_type_results)
+    event_types = [result["_id"] for result in revenue_per_event_type_results]
+    revenues = [result["TotalRevenue"] for result in revenue_per_event_type_results]
+
+    # Query to get average daily sales per hour
+    purchase_times_results = mongo.db.transactions.aggregate([
+        {
+            "$group": {
+                "_id": {"hour": {"$hour": "$TransDate"}},
+                "avg_sales": {"$avg": 1}
+            }
+        },
+        {"$sort": {"_id.hour": 1}}
+    ])
+    purchase_times_results = list(purchase_times_results)
+    purchase_hours = [f"{int(result['_id']['hour']):02}:00" for result in purchase_times_results]
+    average_sales = [result["avg_sales"] for result in purchase_times_results]
 
     # Query for all event names (for the search dropdown)
     event_list = mongo.db.events.distinct("name")
@@ -935,33 +1003,6 @@ def aboutus():
     revenue_event_names_default = [result["_id"] for result in revenue_results_default]
     revenue_data_default = [result["TotalRevenue"] for result in revenue_results_default]
 
-    # Query to get average daily sales per hour
-    purchase_times_results = mongo.db.transactions.aggregate([
-        {
-            "$group": {
-                "_id": {"hour": {"$hour": "$TransDate"}},
-                "avg_sales": {"$avg": 1}
-            }
-        },
-        {"$sort": {"_id.hour": 1}}
-    ])
-    purchase_times_results = list(purchase_times_results)
-    purchase_hours = [f"{int(result['_id']['hour']):02}:00" for result in purchase_times_results]
-    average_sales = [result["avg_sales"] for result in purchase_times_results]
-
-    # Query for revenue per event type
-    revenue_per_event_type_results = mongo.db.events.aggregate([
-        {
-            "$group": {
-                "_id": "$type",
-                "TotalRevenue": {"$sum": "$revenue"}
-            }
-        }
-    ])
-    revenue_per_event_type_results = list(revenue_per_event_type_results)
-    event_types = [result["_id"] for result in revenue_per_event_type_results]
-    revenues = [result["TotalRevenue"] for result in revenue_per_event_type_results]
-
     return render_template('aboutus.html',
                            event_types=event_types,
                            revenues=revenues,
@@ -991,67 +1032,100 @@ def aboutus():
 def get_event_data():
     event_name = request.json.get('event_name').lower()
 
-    # Query ticket sales for the selected event
+    # Query ticket sales for the selected event using transaction date and event name
     ticket_sales_results = mongo.db.tickets.aggregate([
         {
             "$lookup": {
-                "from": "events",
-                "localField": "EventID",
-                "foreignField": "id",
-                "as": "event"
+                "from": "transactions",
+                "let": {"transc_id": "$TranscID"},  # Use TranscID directly as a string
+                "pipeline": [
+                    {
+                        "$match": {
+                            "$expr": {
+                                "$eq": [{"$toString": "$_id"}, "$$transc_id"]  # Convert _id to string for comparison
+                            }
+                        }
+                    },
+                    {
+                        "$lookup": {
+                            "from": "events",
+                            "let": {"event_id": "$EventID"},
+                            "pipeline": [
+                                {
+                                    "$match": {
+                                        "$expr": {
+                                            "$eq": ["$id", "$$event_id"]
+                                        }
+                                    }
+                                }
+                            ],
+                            "as": "event_details"
+                        }
+                    },
+                    {"$unwind": "$event_details"},
+                    {"$match": {"event_details.name": {"$regex": event_name, "$options": "i"}}}
+                ],
+                "as": "transaction_details"
             }
         },
-        {"$unwind": "$event"},
-        {
-            "$match": {
-                "event.name": {"$regex": event_name, "$options": "i"}
-            }
-        },
+        {"$unwind": "$transaction_details"},
         {
             "$group": {
-                "_id": "$event.startDateTime",
+                "_id": {
+                    "year": {"$year": "$transaction_details.TransDate"},
+                    "month": {"$month": "$transaction_details.TransDate"},
+                    "day": {"$dayOfMonth": "$transaction_details.TransDate"}
+                },
                 "TicketsSold": {"$sum": 1}
             }
         },
         {"$sort": {"_id": 1}}
     ])
+
     ticket_sales_results = list(ticket_sales_results)
     ticket_sales_data = {
-        'dates': [result["_id"].strftime('%Y-%m-%d') for result in ticket_sales_results],
+        'dates': [f"{result['_id']['year']}-{result['_id']['month']:02d}-{result['_id']['day']:02d}" for result in ticket_sales_results],
         'values': [result["TicketsSold"] for result in ticket_sales_results]
     }
-
     # Query revenue data for the selected event
     revenue_results = mongo.db.tickets.aggregate([
-        {
-            "$lookup": {
-                "from": "events",
-                "localField": "EventID",
-                "foreignField": "id",
-                "as": "event"
-            }
-        },
-        {"$unwind": "$event"},
-        {
-            "$lookup": {
-                "from": "ticketCategories",
-                "localField": "CatID",
-                "foreignField": "id",
-                "as": "category"
-            }
-        },
-        {"$unwind": "$category"},
-        {
-            "$match": {
-                "event.name": {"$regex": event_name, "$options": "i"}
-            }
-        },
-        {
-            "$group": {
-                "_id": "$event.name",
-                "TotalRevenue": {"$sum": "$category.CatPrice"}
-            }
+    {
+        "$lookup": {
+            "from": "events",
+            "localField": "EventID",
+            "foreignField": "id",
+            "as": "event"
         }
+    },
+    {"$unwind": "$event"},
+    {
+        "$lookup": {
+            "from": "ticketCategories",
+            "let": {"category_id": {"$toObjectId": "$CatID"}},
+            "pipeline": [
+                {
+                    "$match": {
+                        "$expr": {
+                            "$eq": ["$_id", "$$category_id"]
+                        }
+                    }
+                }
+            ],
+            "as": "category"
+        }
+    },
+    {"$unwind": "$category"},
+    {
+        "$match": {
+            "event.name": {"$regex": event_name, "$options": "i"}
+        }
+    },
+    {
+        "$group": {
+            "_id": "$event.name",
+            "TotalRevenue": {"$sum": "$category.CatPrice"}
+        }
+    }
     ])
     revenue_results = list(revenue_results)
     revenue_data = {
