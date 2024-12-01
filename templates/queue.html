@@ -101,7 +101,7 @@
     
     <main class="split-screen">
         <div class="left-side">
-            <img src="{{ event_image.ImageURL }}" alt="{{ event.EventName }}">
+            <img src="{{ event_image }}" alt="{{ event.get('name', 'Event Image') }}">
         </div>
 
         <div class="right-side">
@@ -110,9 +110,9 @@
                 <h3 class="text-center mb-4">Queue Status</h3>
                 <p>You have entered the Queue, please do not leave this page.</p>
                 <p>Leaving this page would mean exiting the queue.</p>
-                <p>Queue Number: {{ data['QNo'] }}</p>
-                <p>User ID: {{ data['UserID'] }}</p>
-                <p>Event ID: {{ data['EventID'] }}</p>
+                <p>Queue Number: {{ data.get('QNo', 'Unknown') }}</p>
+                <p>User ID: {{ data.get('UserID', 'Unknown') }}</p>
+                <p>Event ID: {{ data.get('EventID', 'Unknown') }}</p>
             </div>
             {% endif %}
         </div>
@@ -127,18 +127,22 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.5.2/dist/js/bootstrap.bundle.min.js"></script>
 
     <script>
-        function pauseFor10Seconds() {
+        async function pauseFor10Seconds() {
             return new Promise(resolve => {
-            setTimeout(resolve, 10000);
+                setTimeout(resolve, 10000);
             });
         }
 
         window.onload = async function() {
             await pauseFor10Seconds();
 
-            // Check if event and data variables are defined
-            if ({{ event.EventID | tojson }} && {{ data['UserID'] | tojson }}) {
-                window.location.href = "{{ url_for('inqueue', event_id=event.EventID, queue_id= data['UserID']) }}";
+            const eventID = {{ event.get('id', 'null') | tojson }};
+            const userID = {{ data.get('UserID', 'null') | tojson }};
+
+            if (eventID !== 'null' && userID !== 'null') {
+                window.location.href = "{{ url_for('inqueue', event_id='EVENT_ID', queue_id='USER_ID') }}"
+                    .replace('EVENT_ID', eventID)
+                    .replace('USER_ID', userID);
             }
         };
     </script>

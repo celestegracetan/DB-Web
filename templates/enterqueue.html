@@ -101,29 +101,29 @@
     
     <main class="split-screen">
         <div class="left-side">
-            <img src="{{ event_image.ImageURL }}" alt="{{ event.EventName }}">
+            <!-- Event Image -->
+            <img src="{{ event_image }}" alt="{{ event.get('name', 'Event Image') }}">
         </div>
 
         <div class="right-side">
             {% if session.user_id %}
             <div class="form-container">
-                <h3 class="text-center mb-4">Purchase Form</h3>
-
-                <form id="queueform" action="{{ url_for('joinqueue', event_id=event.EventID) }}" method="post">
+                <h3 class="text-center mb-4">Join Queue</h3>
+                <!-- Form to Join Queue -->
+                <form id="queueform" action="{{ url_for('joinqueue', event_id=event.get('id')) }}" method="post">
                     <div>
                         <button type="submit" class="btn btn-primary btn-block">Join Queue</button>
                     </div>
                 </form>
-               
+            </div>
+            {% else %}
+            <div class="text-center">
+                <p>Please <a href="{{ url_for('registersignup') }}">log in</a> to join the queue.</p>
             </div>
             {% endif %}
         </div>
     </main>
 
     {% include 'footer.html' %}
-    
-    <script>
-
-    </script>
 </body>
 </html>

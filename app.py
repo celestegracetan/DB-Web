@@ -580,7 +580,6 @@ def ticket_purchase(event_id):
         # flash('An error occurred during the purchase. Please try again.', 'error')
         return redirect(url_for('ticket', event_id=event_id))
 
-
 @app.route('/queue/<event_id>')
 def queue(event_id):
     # Check if the user is logged in
@@ -588,28 +587,36 @@ def queue(event_id):
     if not user_id:
         return redirect(url_for('registersignup'))
 
-    preferred_width = 1920
-
     # Fetch the event from MongoDB
     event = mongo.db.events.find_one({"id": event_id})
     if not event:
         return redirect(url_for('login'))
 
-    # Choose preferred image based on width
-    if "images" in event and event["images"]:
-        preferred_image = min(
-            event["images"], key=lambda img: abs(img.get("Width", preferred_width) - preferred_width)
-        )
-        image_url = preferred_image["URL"]
-    else:
-        image_url = url_for('static', filename='images/default.jpg')
+    # Convert ObjectId to string for serialization
+    event['_id'] = str(event['_id'])
 
-    # Prepare event information for the template
-    event_image = {
-        "ImageURL": image_url,
-    }
+    # Fetch the preferred image for the event
+    image = mongo.db.images.find_one({'EventID': event.get('id')}) or {}
+    event_image = image.get('URL', url_for('static', filename='images/default.jpg'))
 
-    return render_template('enterqueue.html', event_image=event_image, event=event)
+    # Check for existing queue entries for the user and clean up if necessary
+    existing_queue = mongo.db.queues.find_one({"user_id": user_id, "event_id": event_id})
+    if existing_queue:
+        app.logger.info(f"Cleaning up stale queue entry for user: {user_id}, event: {event_id}")
+        mongo.db.queues.delete_one({"_id": existing_queue["_id"]})
+
+    # Debugging Output
+    app.logger.info(f"Event: {event}")
+    app.logger.info(f"Image: {image}")
+    app.logger.info(f"Event Image URL: {event_image}")
+
+    # Render the queue page
+    return render_template(
+        'enterqueue.html',
+        event=event,
+        event_image=event_image
+    )
+
 
 
 @app.route('/joinqueue/<event_id>', methods=['POST'])
@@ -621,17 +628,8 @@ def joinqueue(event_id):
     # Fetch the user from the MongoDB `users` collection
     object_id = ObjectId(user_id)
     user = mongo.db.users.find_one({"_id": object_id})
-    if user:
-        # Convert ObjectId to string here
-        user['_id'] = str(user['_id'])
     if not user:
-        error_message = 'Please log in first'
-        return render_template(
-            'registersignup.html',
-            error_message=error_message,
-            registration_form=RegistrationForm(),
-            login_form=LoginForm()
-        )
+        return redirect(url_for('registersignup'))
 
     # Fetch event from MongoDB
     event = mongo.db.events.find_one({"id": event_id})
@@ -639,50 +637,48 @@ def joinqueue(event_id):
         flash('Event not found.', 'error')
         return redirect(url_for('landing'))
 
-    # Check if the user is already in the queue for this event
+    # Convert ObjectId to string for serialization
+    event['_id'] = str(event['_id'])
+
+    # Fetch the preferred image for the event
+    image = mongo.db.images.find_one({'EventID': event.get('id')}) or {}
+    event_image = image.get('URL', url_for('static', filename='images/default.jpg'))
+
+    # Debugging Output
+    app.logger.info(f"Event: {event}")
+    app.logger.info(f"Image: {image}")
+    app.logger.info(f"Event Image URL: {event_image}")
+
+    # Check if the user is already in the queue
     existing_queue = mongo.db.queues.find_one({"user_id": user_id, "event_id": event_id})
     if existing_queue:
         flash('You are already in the queue for this event.', 'info')
-        return redirect(url_for('event', event_id=event_id))
+        return redirect(url_for('inqueue', event_id=event_id, queue_id=str(existing_queue['_id'])))
 
-    # Choose preferred image based on width
-    preferred_width = 1920
-    if "images" in event and event["images"]:
-        preferred_image = min(
-            event["images"], key=lambda img: abs(img.get("Width", preferred_width) - preferred_width)
-        )
-        image_url = preferred_image["URL"]
-    else:
-        image_url = url_for('static', filename='images/default.jpg')
+    # Insert a new queue entry only if no existing entry is found
+    queue_entry = {
+        "user_id": user_id,
+        "event_id": event_id,
+        "timestamp": datetime.now()
+    }
+    result = mongo.db.queues.insert_one(queue_entry)
+    queue_no = str(result.inserted_id)
 
-    event_image = {
-        "ImageURL": image_url,
+    # Prepare data for the template
+    data = {
+        "UserID": user_id,
+        "EventID": event_id,
+        "QNo": queue_no
     }
 
-    try:
-        # Insert new queue entry into MongoDB
-        queue_entry = {
-            "user_id": user_id,
-            "event_id": event_id,
-            "timestamp": datetime.now()
-        }
-        result = mongo.db.queues.insert_one(queue_entry)
+    # Render the queue page
+    return render_template(
+        'queue.html',
+        data=data,
+        event_image=event_image,
+        event=event
+    )
 
-        # Fetch queue number (using the document's auto-generated `_id` field)
-        queue_no = result.inserted_id
-
-        data = {
-            "UserID": user_id,
-            "EventID": event_id,
-            "QNo": str(queue_no)
-        }
-
-    except Exception as e:
-        flash('Failed to join the queue. Please try again.', 'error')
-        logging.error(f"Error during queue addition: {e}\n{traceback.format_exc()}")
-        return redirect(url_for('event', event_id=event_id))
-
-    return render_template('queue.html', data=data, event_image=event_image, event=event)
 
 @app.route('/joinqueue/<event_id>/inqueue/<queue_id>')
 def inqueue(event_id, queue_id):
@@ -693,65 +689,44 @@ def inqueue(event_id, queue_id):
     if not event:
         return redirect(url_for('landing'))
 
-    # Preferred image selection
-    preferred_width = 1920
-    if "images" in event and event["images"]:
-        preferred_image = min(
-            event["images"], key=lambda img: abs(img.get("Width", preferred_width) - preferred_width)
-        )
-        image_url = preferred_image["URL"]
-    else:
-        image_url = url_for('static', filename='images/default.jpg')
+    # Fetch ticket categories for the event
+    ticket_categories = list(mongo.db.ticketCategories.find({"EventID": event_id}))
+    app.logger.info(f"Ticket Categories for Event {event_id}: {ticket_categories}")
 
-    event_image = {
-        "ImageURL": image_url,
-    }
+    # Fetch the preferred image for the event
+    image = mongo.db.images.find_one({'EventID': event.get('id')}) or {}
+    event_image = image.get('URL', url_for('static', filename='images/default.jpg'))
 
-    # Retrieve the top user in the queue for the event
-    top_queue_entry = mongo.db.queues.find_one({"event_id": event_id}, sort=[("timestamp", 1)])
+    # Check ticket availability
+    tickets_available = False
+    for category in ticket_categories:
+        seats_available = category.get("SeatsAvailable", 0)
+        tickets_sold = mongo.db.tickets.count_documents({"CatID": category.get("CatID")})
+        remaining_seats = seats_available - tickets_sold
+        app.logger.info(f"Category: {category['CatName']}, Seats Available: {remaining_seats}")
 
-    if top_queue_entry:
-        top_user_id = top_queue_entry["user_id"]
+        if remaining_seats > 0:
+            tickets_available = True
+            break
 
-        # Check if the logged-in user is at the top of the queue
-        if top_user_id == user_id:
-            # Fetch the user from the MongoDB `users` collection
-            object_id = ObjectId(user_id)
-            user = mongo.db.users.find_one({"_id": object_id})
-            if user:
-                # Convert ObjectId to string here
-                user['_id'] = str(user['_id'])
+    # Remove the user from the queue
+    mongo.db.queues.delete_one({"_id": ObjectId(queue_id)})
+    app.logger.info(f"User {user_id} removed from queue for Event {event_id}.")
 
-            # Determine ticket availability
-            tickets_available = any(
-                category["SeatsAvailable"] > mongo.db.tickets.count_documents({"CatID": category["CatID"]})
-                for category in event.get("ticketCategories", [])
-            )
+    # If tickets are available, proceed
+    if tickets_available:
+        app.logger.info(f"Tickets available for Event {event_id}. Redirecting to ticket page.")
+        return redirect(url_for('ticket', event_id=event_id))
 
-            # Optionally remove the user from the queue after they proceed
-            mongo.db.queues.delete_one({"_id": top_queue_entry["_id"]})  # Remove the queue entry
-
-            return render_template(
-                'ticket.html',
-                event=event,
-                calendar=calendar,
-                event_image=event_image,
-                user=user,
-                tickets_available=tickets_available,
-                payment_method=mongo.db.paymentMethods.find_one({"user_id": user_id}),
-            )
-
-        else:
-            # The current user is not the top user, just re-render the queue page
-            data = {
-                "UserID": user_id,
-                "EventID": event_id,
-                "QNo": queue_id,
-            }
-            return render_template("queue.html", data=data, event_image=event_image, event=event)
-
-    else:
-        return redirect(url_for("queue", event_id=event_id))
+    # Otherwise, render queue page with 'Tickets Sold Out' message
+    app.logger.info(f"No tickets available for Event {event_id}. Rendering queue page.")
+    return render_template(
+        'queue.html',
+        event=event,
+        event_image=event_image,
+        queue_id=queue_id,
+        tickets_available=tickets_available
+    )
 
 @app.context_processor
 def inject_user():
